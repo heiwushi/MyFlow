@@ -2,6 +2,29 @@ import numpy as np
 import abc
 
 
+class _GradientMode(object):
+    '''
+    该类用于标记是否在计算梯度。当处于梯度计算过程时，每个节点的output_nodes是不变的
+    该类不是线程安全的
+    '''
+    __gradient_mode = False
+    __enter_counter = 0
+
+    def __enter__(self):
+        _GradientMode.__enter_counter += 1
+        _GradientMode.__gradient_mode = True
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+
+        _GradientMode.__enter_counter -= 1
+        if _GradientMode.__enter_counter ==0:
+            _GradientMode.__gradient_mode = False
+
+    @classmethod
+    def is_gradient_mode(cls):
+        return cls.__gradient_mode
+
+
 class Node(object):
     def __init__(self):
         self.input_nodes = []  # 该节点连接的输入节点
@@ -80,8 +103,9 @@ class Add(Op):
         assert input1.shape == input2.shape
         new_node = super().__call__(node_name)
         new_node.input_nodes = [input1, input2]
-        input1.out_nodes.append(new_node)
-        input2.out_nodes.append(new_node)
+        if not _GradientMode.is_gradient_mode():
+            input1.out_nodes.append(new_node)
+            input2.out_nodes.append(new_node)
         new_node.shape = list(input1.shape)
         return new_node
 
@@ -104,8 +128,9 @@ class Mul(Op):
         assert input1.shape == input2.shape
         new_node = super().__call__(node_name)
         new_node.input_nodes = [input1, input2]
-        input1.out_nodes.append(new_node)
-        input2.out_nodes.append(new_node)
+        if not _GradientMode.is_gradient_mode():
+            input1.out_nodes.append(new_node)
+            input2.out_nodes.append(new_node)
         new_node.shape = input1.shape[0]
         return new_node
 
@@ -125,16 +150,18 @@ class MatMul(Op):
         assert input1.shape[1] == input2.shape[0]
         new_node = super().__call__(node_name)
         new_node.input_nodes = [input1, input2]
-        input1.out_nodes.append(new_node)
-        input2.out_nodes.append(new_node)
+        if not _GradientMode.is_gradient_mode():
+            input1.out_nodes.append(new_node)
+            input2.out_nodes.append(new_node)
         new_node.shape = [input1.shape[0], input2.shape[1]]
         return new_node
 
     def compute(self, node: Node, input_vals):
         return np.matmul(input_vals[0], input_vals[1])
 
-    def gradient(self, node: Node, output_grad:Node):
-        return [matmul(output_grad, transpose(node.input_nodes[1])), matmul(node.input_nodes[0], output_grad)]
+    def gradient(self, node: Node, output_grad: Node):
+        return [matmul(output_grad, transpose(node.input_nodes[1])),
+                matmul(transpose(node.input_nodes[0]), output_grad)]
 
 
 class Transpose(Op):
@@ -145,14 +172,15 @@ class Transpose(Op):
     def __call__(self, input: Node, node_name=''):
         new_node = super().__call__(node_name)
         new_node.input_nodes = [input]
-        input.out_nodes.append(new_node)
+        if not _GradientMode.is_gradient_mode():
+            input.out_nodes.append(new_node)
         new_node.shape = [input.shape[1], input.shape[0]]
         return new_node
 
     def compute(self, node: Node, input_vals):
         return np.transpose(input_vals[0])
 
-    def gradient(self, node: Node, output_grad:Node):
+    def gradient(self, node: Node, output_grad: Node):
         return [transpose(output_grad)]
 
 
@@ -164,7 +192,8 @@ class OnesLike(Op):
     def __call__(self, input: Node, node_name=''):
         new_node = super().__call__(node_name)
         new_node.input_nodes = [input]
-        # input.out_nodes.append(new_node)
+        if not _GradientMode.is_gradient_mode():
+            input.out_nodes.append(new_node)
         new_node.shape = list(input.shape)
         return new_node
 
@@ -183,7 +212,8 @@ class ZerosLike(Op):
     def __call__(self, input: Node, node_name=''):
         new_node = super().__call__(node_name)
         new_node.input_nodes = [input]
-        # input.out_nodes.append(new_node)
+        if not _GradientMode.is_gradient_mode():
+            input.out_nodes.append(new_node)
         new_node.shape = list(input.shape)
         return new_node
 
@@ -202,7 +232,8 @@ class ReduceSum(Op):
     def __call__(self, input: Node, axis, node_name=''):
         new_node = super().__call__(node_name)
         new_node.input_nodes = [input]
-        input.out_nodes.append(new_node)
+        if not _GradientMode.is_gradient_mode():
+            input.out_nodes.append(new_node)
         new_node.params["axis"] = axis
         new_shape = list(input.shape)
         new_shape[axis] = 1
@@ -224,7 +255,8 @@ class Broadcast(Op):
         assert input.shape[axis] == 1
         new_node = super().__call__(node_name)
         new_node.input_nodes = [input]
-        input.out_nodes.append(new_node)
+        if not _GradientMode.is_gradient_mode():
+            input.out_nodes.append(new_node)
         new_node.shape = list(shape)
         new_node.params["axis"] = axis
         return new_node
@@ -247,23 +279,39 @@ placeholder = PlaceHolder()
 oneslike = OnesLike()
 zeroslike = ZerosLike()
 
-gradient_dict = {}
+
 
 
 def compute_gradient(final_node: Node, target_node: Node, name=None):
+    '''
+    给出因变量final_node关于自变量target_node的梯度的计算图
+    :param final_node: 所求梯度的因变量
+    :param target_node: 所求梯度的自变量
+    :param name:节点名
+    :return:
+    '''
+    print("---------------------------------------")
+    print(final_node, target_node)
+    for tn in target_node.out_nodes:
+        print(target_node,"out_nodes:",tn)
+    # 考虑简单的情况，这里要求必须是[1,1]形状，即标量。实际上机器学习中的损失loss一般都是标量。
     assert final_node.shape[0] == 1 and final_node.shape[1] == 1
-    gradient_dict[final_node] = oneslike(final_node)
-    if gradient_dict.get(target_node):
-        return gradient_dict[target_node]
-    else:
-        result = zeroslike(target_node)
-        for output_n in target_node.out_nodes:
-            output_grad = compute_gradient(final_node, output_n)
-            order = output_n.input_nodes.index(target_node)
-            target_node_g = output_n.op.gradient(output_n, output_grad)[order]
-            result = add(result, target_node_g)
-        gradient_dict[target_node] = result
-        return result
+    # 如果求的是关于自身的梯度，则直接返回一个形状与target_node一样、元素全为1的矩阵
+    with _GradientMode():
+        if target_node == final_node:
+            return oneslike(target_node)
+        else:
+            # 根据多元复合函数求导法则，final_node关于target_node的导数，应该为final_node对target_node的所有输出节点所在路径分别求导，之后求和
+            result = zeroslike(target_node)
+            for output_n in target_node.out_nodes:
+                # 对于每条输出路径，先对输出节点求导
+                output_grad = compute_gradient(final_node, output_n)
+                # 之后根据该节点的操作的gradient函数，计算该条路径对target_node的导数
+                order = output_n.input_nodes.index(target_node)
+                target_node_g = output_n.op.gradient(output_n, output_grad)[order]
+                # 与之前各条路径的结果累加
+                result = add(result, target_node_g)
+            return result
 
 
 class Session(object):
@@ -287,18 +335,3 @@ class Session(object):
         return result_vals
 
 
-v1 = placeholder(shape=[2, 3], node_name="v1")
-v2 = placeholder(shape=[2, 3], node_name="v2")
-v3 = add(v1, v2, node_name="v3")
-v4 = add(v1, v3, node_name="v4")
-v5 = reduce_sum(v4, axis=0, node_name="v5")
-v6 = reduce_sum(v5, axis=1, node_name="v6")
-gradient = compute_gradient(v6, v6, "v6_v1_gradient")
-sess = Session()
-v4_val, v5_val, v6_val, gradient_val = sess.run([v4, v5, v6, gradient],
-                                                feed_dict={v1: np.asarray([[1, 2, 3], [2, 2, 2]]),
-                                                           v2: np.asarray([[4, 5, 6], [1, 1, 1]])})
-print(v4_val)
-print(v5_val)
-print(v6_val)
-print(gradient_val)
