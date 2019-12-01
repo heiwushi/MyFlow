@@ -1,6 +1,7 @@
 import numpy as np
 import abc
 
+TRAIN_VARS_COLLECTIONS=[]
 
 class _GradientMode(object):
     '''
@@ -70,9 +71,26 @@ class Op(abc.ABC):
         pass
 
 
+
 class Variable(Op):
-    def __init__(self, name=None):
+    def __init__(self):
+        self.op_name = "Variable"
+
+    def __call__(self, shape, init_value:np.ndarray, assign_node: Node=None, node_name=None):
+        assert init_value.shape == tuple(shape)
+        new_node = super().__call__(node_name)
+        new_node.shape = list(shape)
+        new_node.value = init_value
+        TRAIN_VARS_COLLECTIONS.append(new_node)
+        return new_node
+    def compute(self, node: Node, input_vals):
+        return node.value
+
+    def gradient(self, node: Node, output_grad: Node):
         pass
+
+
+
 
 
 class PlaceHolder(Op):
@@ -276,43 +294,9 @@ reduce_sum = ReduceSum()
 broadcast = Broadcast()
 
 placeholder = PlaceHolder()
+variable = Variable()
 oneslike = OnesLike()
 zeroslike = ZerosLike()
-
-
-
-
-def compute_gradient(final_node: Node, target_node: Node, name=None):
-    '''
-    给出因变量final_node关于自变量target_node的梯度的计算图
-    :param final_node: 所求梯度的因变量
-    :param target_node: 所求梯度的自变量
-    :param name:节点名
-    :return:
-    '''
-    print("---------------------------------------")
-    print(final_node, target_node)
-    for tn in target_node.out_nodes:
-        print(target_node,"out_nodes:",tn)
-    # 考虑简单的情况，这里要求必须是[1,1]形状，即标量。实际上机器学习中的损失loss一般都是标量。
-    assert final_node.shape[0] == 1 and final_node.shape[1] == 1
-    # 如果求的是关于自身的梯度，则直接返回一个形状与target_node一样、元素全为1的矩阵
-    with _GradientMode():
-        if target_node == final_node:
-            return oneslike(target_node)
-        else:
-            # 根据多元复合函数求导法则，final_node关于target_node的导数，应该为final_node对target_node的所有输出节点所在路径分别求导，之后求和
-            result = zeroslike(target_node)
-            for output_n in target_node.out_nodes:
-                # 对于每条输出路径，先对输出节点求导
-                output_grad = compute_gradient(final_node, output_n)
-                # 之后根据该节点的操作的gradient函数，计算该条路径对target_node的导数
-                order = output_n.input_nodes.index(target_node)
-                target_node_g = output_n.op.gradient(output_n, output_grad)[order]
-                # 与之前各条路径的结果累加
-                result = add(result, target_node_g)
-            return result
-
 
 class Session(object):
 
