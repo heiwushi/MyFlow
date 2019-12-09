@@ -2,6 +2,9 @@ import numpy as np
 import abc
 
 
+train_variable_collection=[]
+
+
 class _GradientMode(object):
     '''
     该类用于标记是否在计算梯度。当处于梯度计算过程时，每个节点的output_nodes是不变的
@@ -72,7 +75,25 @@ class Op(abc.ABC):
 
 class Variable(Op):
     def __init__(self, name=None):
+        self.op_name = "Variable"
+
+    def __call__(self, shape, init_value:np.ndarray, node_name=''):
+        new_node = super().__call__(node_name)
+        new_node.shape = list(shape)
+        new_node.variable_val = init_value
+        train_variable_collection.append(self)
+
+    def compute(self, node: Node, inputs_vals):
+        return node.variable_val
+
+    def gradient(self, node: Node, output_grad: Node):
         pass
+
+    def assignment(self):
+        pass
+
+
+
 
 
 class PlaceHolder(Op):
@@ -245,6 +266,7 @@ class ReduceSum(Op):
 
     def gradient(self, node: Node, output_grad: Node):
         return [broadcast(output_grad, shape=node.input_nodes[0].shape, axis=node.params["axis"])]
+
 
 
 class Broadcast(Op):
