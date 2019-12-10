@@ -4,6 +4,7 @@ from myflow.common import _GradientMode
 
 TRAIN_VARS_COLLECTIONS = []
 
+
 class Tensor(object):
     def __init__(self):
         self.input_tensors = []  # 该节点连接的输入节点
@@ -16,6 +17,10 @@ class Tensor(object):
     def __str__(self):
         return self.name
 
+    def __neg__(self):
+        print("__neg__")
+        return minus(self)
+
     def __add__(self, other):
         print("__add__")
         return add(self, other)
@@ -24,9 +29,13 @@ class Tensor(object):
         print("__radd__")
         return add(other, self)
 
-    def __neg__(self):
-        print("__neg__")
-        return minus(self)
+    def __sub__(self, other):
+        print("__sub__")
+        return add(self, -other)
+
+    def __rsub__(self, other):
+        print("__rsub__")
+        return add(other, -self)
 
     def __mul__(self, other):
         print("__mul__")
@@ -36,13 +45,15 @@ class Tensor(object):
         print("__rmul__")
         return mul(other, self)
 
-    def __sub__(self, other):
-        print("__sub__")
-        return add(self, -other)
+    def __truediv__(self, other):
+        print("__truediv__")
+        return divide(self, other)
 
-    def __rsub__(self, other):
-        print("__rsub__")
-        return add(other, -self)
+    def __rtruediv__(self, other):
+        print("__rtruediv__")
+        return divide(other, self)
+
+
 
 
 class Op(abc.ABC):
@@ -139,7 +150,7 @@ class Add(Op):
         self.op_name = "Add"
 
     def __call__(self, input1: Tensor, input2: Tensor, tensor_name=''):
-        input1, input2=convert_py_numeric(input1, input2)
+        input1, input2 = convert_py_numeric(input1, input2)
         assert input1.shape == input2.shape
         new_tensor = super().__call__(tensor_name)
         new_tensor.input_tensors = [input1, input2]
@@ -165,7 +176,7 @@ class Mul(Op):
         self.op_name = "Mul"
 
     def __call__(self, input1: Tensor, input2: Tensor, tensor_name=''):
-        input1, input2=convert_py_numeric(input1, input2)
+        input1, input2 = convert_py_numeric(input1, input2)
         assert input1.shape == input2.shape
         new_tensor = super().__call__(tensor_name)
         new_tensor.input_tensors = [input1, input2]
@@ -179,7 +190,7 @@ class Mul(Op):
         return np.multiply(inputs_vals[0], inputs_vals[1])
 
     def gradient(self, tensor: Tensor, output_grad: Tensor):
-        return [mul(output_grad, tensor.input_tensors[1]), mul(output_grad, tensor.input_tensors[0])]
+        return [output_grad * tensor.input_tensors[1], output_grad * tensor.input_tensors[0]]
 
 
 class MatMul(Op):
@@ -306,7 +317,8 @@ class Broadcast(Op):
         return np.broadcast_to(input_vals[0], tensor.shape)
 
     def gradient(self, tensor: Tensor, output_grad: Tensor):
-        return reduce_sum(output_grad, axis=tensor.params["axis"])
+        return [reduce_sum(output_grad, axis=tensor.params["axis"])]
+
 
 class Sigmoid(Op):
     def __init__(self):
@@ -321,11 +333,12 @@ class Sigmoid(Op):
         return new_tensor
 
     def compute(self, tensor: Tensor, input_vals):
-        return 1/(1+np.exp(-input_vals[0]))
+        return 1 / (1 + np.exp(-input_vals[0]))
 
     def gradient(self, tensor: Tensor, output_grad: Tensor):
-        x=tensor.input_tensors[0]
-        return sigmoid(x) * (1-sigmoid(x)) * output_grad
+        x = tensor.input_tensors[0]
+        return [sigmoid(x) * (1 - sigmoid(x)) * output_grad]
+
 
 class Minus(Op):
     def __init__(self):
@@ -343,7 +356,7 @@ class Minus(Op):
         return -input_vals[0]
 
     def gradient(self, tensor: Tensor, output_grad: Tensor):
-        return minus(output_grad)
+        return [-output_grad]
 
 
 class Exp(Op):
@@ -362,7 +375,7 @@ class Exp(Op):
         return np.exp(input_vals[0])
 
     def gradient(self, tensor: Tensor, output_grad: Tensor):
-        return mul(exp(tensor.input_tensors[0]), output_grad)
+        return [exp(tensor.input_tensors[0]) * output_grad]
 
 
 class Log(Op):
@@ -383,13 +396,38 @@ class Log(Op):
     def gradient(self, tensor: Tensor, output_grad: Tensor):
         return None
 
+
+class Divide(Op):
+    def __init__(self):
+        self.op_name = "Divide"
+
+    def __call__(self, input1: Tensor, input2: Tensor, tensor_name=''):
+        input1, input2 = convert_py_numeric(input1, input2)
+        assert input1.shape[1] == input2.shape[0]
+        new_tensor = super().__call__(tensor_name)
+        new_tensor.input_tensors = [input]
+        if not _GradientMode.is_gradient_mode():
+            input1.out_tensors.append(new_tensor)
+            input2.out_tensors.append(new_tensor)
+        new_tensor.shape = list(input1.shape)
+        return new_tensor
+
+    def compute(self, tensor: Tensor, input_vals):
+        return np.divide(input_vals[0], input_vals[1])
+
+    def gradient(self, tensor: Tensor, output_grad: Tensor):
+        return [output_grad/tensor.input_tensors[1], -output_grad*tensor.input_tensors[0]/(tensor.input_tensors[1]*tensor.input_tensors[1])]
+
+
+
+
 def convert_py_numeric(x, y):
     assert type(x) in [int, float, Tensor]
     assert type(y) in [int, float, Tensor]
     if isinstance(x, int) or isinstance(x, float):
-        x = constant(y.shape, const_value=x*np.ones(shape=y.shape))
+        x = constant(y.shape, const_value=x * np.ones(shape=y.shape))
     if isinstance(y, int) or isinstance(y, float):
-        y = constant(x.shape, const_value=y*np.ones(shape=x.shape))
+        y = constant(x.shape, const_value=y * np.ones(shape=x.shape))
     return x, y
 
 
@@ -400,9 +438,9 @@ matmul = MatMul()
 transpose = Transpose()
 reduce_sum = ReduceSum()
 broadcast = Broadcast()
-exp=Exp()
+exp = Exp()
+divide = Divide()
 sigmoid = Sigmoid()
-
 
 placeholder = PlaceHolder()
 variable = Variable()
