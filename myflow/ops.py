@@ -18,42 +18,31 @@ class Tensor(object):
         return self.name
 
     def __neg__(self):
-        print("__neg__")
         return minus(self)
 
     def __add__(self, other):
-        print("__add__")
         return add(self, other)
 
     def __radd__(self, other):
-        print("__radd__")
         return add(other, self)
 
     def __sub__(self, other):
-        print("__sub__")
         return add(self, -other)
 
     def __rsub__(self, other):
-        print("__rsub__")
         return add(other, -self)
 
     def __mul__(self, other):
-        print("__mul__")
         return mul(self, other)
 
     def __rmul__(self, other):
-        print("__rmul__")
         return mul(other, self)
 
     def __truediv__(self, other):
-        print("__truediv__")
         return divide(self, other)
 
     def __rtruediv__(self, other):
-        print("__rtruediv__")
         return divide(other, self)
-
-
 
 
 class Op(abc.ABC):
@@ -92,10 +81,9 @@ class Variable(Op):
     def __init__(self):
         self.op_name = "Variable"
 
-    def __call__(self, shape, init_value: np.ndarray, tensor_name=None):
-        assert init_value.shape == tuple(shape)
+    def __call__(self, init_value: np.ndarray, tensor_name=None):
         new_tensor = super().__call__(tensor_name)
-        new_tensor.shape = list(shape)
+        new_tensor.shape = list(init_value.shape)
         new_tensor.value = init_value
         TRAIN_VARS_COLLECTIONS.append(new_tensor)
         return new_tensor
@@ -111,10 +99,9 @@ class Constant(Op):
     def __init__(self):
         self.op_name = "Constant"
 
-    def __call__(self, shape, const_value: np.ndarray, tensor_name=""):
-        assert const_value.shape == tuple(shape)
+    def __call__(self, const_value: np.ndarray, tensor_name=""):
         new_tensor = super().__call__(tensor_name)
-        new_tensor.shape = list(shape)
+        new_tensor.shape = list(const_value.shape)
         new_tensor.value = const_value
         return new_tensor
 
@@ -183,7 +170,7 @@ class Mul(Op):
         if not _GradientMode.is_gradient_mode():
             input1.out_tensors.append(new_tensor)
             input2.out_tensors.append(new_tensor)
-        new_tensor.shape = input1.shape[0]
+        new_tensor.shape = input1.shape
         return new_tensor
 
     def compute(self, tensor: Tensor, inputs_vals):
@@ -309,7 +296,9 @@ class Broadcast(Op):
         new_tensor.input_tensors = [input]
         if not _GradientMode.is_gradient_mode():
             input.out_tensors.append(new_tensor)
-        new_tensor.shape = list(shape)
+        new_shape = list(input.shape)
+        new_shape[axis] = shape[axis]
+        new_tensor.shape = new_shape
         new_tensor.params["axis"] = axis
         return new_tensor
 
@@ -338,6 +327,45 @@ class Sigmoid(Op):
     def gradient(self, tensor: Tensor, output_grad: Tensor):
         x = tensor.input_tensors[0]
         return [sigmoid(x) * (1 - sigmoid(x)) * output_grad]
+
+
+class Relu(Op):
+    def __init__(self):
+        self.op_name = "Relu"
+
+    def __call__(self, input: Tensor, tensor_name=''):
+        new_tensor = super().__call__(tensor_name)
+        new_tensor.input_tensors = [input]
+        if not _GradientMode.is_gradient_mode():
+            input.out_tensors.append(new_tensor)
+        new_tensor.shape = list(input.shape)
+        return new_tensor
+
+    def compute(self, tensor: Tensor, input_vals):
+        return (np.abs(input_vals[0]) + input_vals[0]) / 2
+
+    def gradient(self, tensor: Tensor, output_grad: Tensor):
+        return [stepfunc(tensor.input_tensors[0]) * output_grad]
+
+
+class StepFunc(Op):
+
+    def __init__(self):
+        self.op_name = "Relu"
+
+    def __call__(self, input: Tensor, tensor_name=''):
+        new_tensor = super().__call__(tensor_name)
+        new_tensor.input_tensors = [input]
+        if not _GradientMode.is_gradient_mode():
+            input.out_tensors.append(new_tensor)
+        new_tensor.shape = list(input.shape)
+        return new_tensor
+
+    def compute(self, tensor: Tensor, input_vals):
+        return (1 + np.sign(input_vals[0])) / 2
+
+    def gradient(self, tensor: Tensor, output_grad: Tensor):
+        pass
 
 
 class Minus(Op):
@@ -394,7 +422,7 @@ class Log(Op):
         return np.log(input_vals[0])
 
     def gradient(self, tensor: Tensor, output_grad: Tensor):
-        return None
+        return [output_grad / tensor.input_tensors[0]]
 
 
 class Divide(Op):
@@ -403,9 +431,9 @@ class Divide(Op):
 
     def __call__(self, input1: Tensor, input2: Tensor, tensor_name=''):
         input1, input2 = convert_py_numeric(input1, input2)
-        assert input1.shape[1] == input2.shape[0]
+        assert input1.shape == input2.shape
         new_tensor = super().__call__(tensor_name)
-        new_tensor.input_tensors = [input]
+        new_tensor.input_tensors = [input1, input2]
         if not _GradientMode.is_gradient_mode():
             input1.out_tensors.append(new_tensor)
             input2.out_tensors.append(new_tensor)
@@ -416,18 +444,17 @@ class Divide(Op):
         return np.divide(input_vals[0], input_vals[1])
 
     def gradient(self, tensor: Tensor, output_grad: Tensor):
-        return [output_grad/tensor.input_tensors[1], -output_grad*tensor.input_tensors[0]/(tensor.input_tensors[1]*tensor.input_tensors[1])]
-
-
+        return [output_grad / tensor.input_tensors[1],
+                -output_grad * tensor.input_tensors[0] / (tensor.input_tensors[1] * tensor.input_tensors[1])]
 
 
 def convert_py_numeric(x, y):
     assert type(x) in [int, float, Tensor]
     assert type(y) in [int, float, Tensor]
     if isinstance(x, int) or isinstance(x, float):
-        x = constant(y.shape, const_value=x * np.ones(shape=y.shape))
+        x = constant(const_value=x * np.ones(shape=y.shape))
     if isinstance(y, int) or isinstance(y, float):
-        y = constant(x.shape, const_value=y * np.ones(shape=x.shape))
+        y = constant(const_value=y * np.ones(shape=x.shape))
     return x, y
 
 
@@ -439,8 +466,11 @@ transpose = Transpose()
 reduce_sum = ReduceSum()
 broadcast = Broadcast()
 exp = Exp()
+log = Log()
 divide = Divide()
 sigmoid = Sigmoid()
+relu = Relu()
+stepfunc = StepFunc()
 
 placeholder = PlaceHolder()
 variable = Variable()
