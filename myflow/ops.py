@@ -275,15 +275,20 @@ class ReduceSum(Op):
             input.out_tensors.append(new_tensor)
         new_tensor.params["axis"] = axis
         new_shape = list(input.shape)
-        new_shape[axis] = 1
+        new_shape.pop(axis)
         new_tensor.shape = new_shape
         return new_tensor
 
     def compute(self, tensor: Tensor, input_vals):
-        return np.reshape(np.sum(input_vals[0], axis=tensor.params["axis"]), tensor.shape)
+        return np.sum(input_vals[0], axis=tensor.params["axis"])
 
     def gradient(self, tensor: Tensor, output_grad: Tensor):
-        return [broadcast(output_grad, shape=tensor.input_tensors[0].shape, axis=tensor.params["axis"])]
+        # 因为reduce_sum后，axis指定的维度会被消减掉，而broadcast要求广播的维度是1
+        # 所以反向链式求导时，需要把output_grad在axis上的维度恢复为1
+        output_shape = list(tensor.shape)
+        output_shape.insert(tensor.params["axis"], 1)
+        new_output_grad = reshape(output_grad, shape=output_shape)
+        return [broadcast(new_output_grad, shape=tensor.input_tensors[0].shape, axis=tensor.params["axis"])]
 
 
 class Broadcast(Op):
@@ -306,7 +311,8 @@ class Broadcast(Op):
         return np.broadcast_to(input_vals[0], tensor.shape)
 
     def gradient(self, tensor: Tensor, output_grad: Tensor):
-        return [reduce_sum(output_grad, axis=tensor.params["axis"])]
+        #因为reduce_sum操作会消减掉axis维度，而broadcast操作的输入在axis上维度应该为1，所以还需要reshape一下
+        return [reshape(reduce_sum(output_grad, axis=tensor.params["axis"]), tensor.input_tensors[0].shape)]
 
 
 class Sigmoid(Op):
@@ -425,6 +431,26 @@ class Log(Op):
         return [output_grad / tensor.input_tensors[0]]
 
 
+class Reshape(Op):
+    def __init__(self):
+        self.op_name = "Reshape"
+
+    def __call__(self, input: Tensor, shape, tensor_name=''):
+        new_tensor = super().__call__(tensor_name)
+        new_tensor.input_tensors = [input]
+        if not _GradientMode.is_gradient_mode():
+            input.out_tensors.append(new_tensor)
+        new_tensor.shape = list(shape)
+        return new_tensor
+
+    def compute(self, tensor: Tensor, input_vals):
+        return np.reshape(input_vals[0], tensor.shape)
+
+    def gradient(self, tensor: Tensor, output_grad: Tensor):
+        return [reshape(output_grad, tensor.input_tensors[0])]
+
+
+
 class Divide(Op):
     def __init__(self):
         self.op_name = "Divide"
@@ -471,6 +497,7 @@ divide = Divide()
 sigmoid = Sigmoid()
 relu = Relu()
 stepfunc = StepFunc()
+reshape = Reshape()
 
 placeholder = PlaceHolder()
 variable = Variable()
