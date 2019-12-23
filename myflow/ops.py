@@ -440,6 +440,7 @@ class Reshape(Op):
         new_tensor.input_tensors = [input]
         if not _GradientMode.is_gradient_mode():
             input.out_tensors.append(new_tensor)
+        print(shape)
         new_tensor.shape = list(shape)
         return new_tensor
 
@@ -447,7 +448,7 @@ class Reshape(Op):
         return np.reshape(input_vals[0], tensor.shape)
 
     def gradient(self, tensor: Tensor, output_grad: Tensor):
-        return [reshape(output_grad, tensor.input_tensors[0])]
+        return [reshape(output_grad, tensor.input_tensors[0].shape)]
 
 
 

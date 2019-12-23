@@ -3,3 +3,4 @@ from myflow.ops import add, mul, matmul, transpose, reduce_sum, broadcast, onesl
 from myflow.session import Session
 import myflow.optimizer as optimizer
 import myflow.losses as loss
+import myflow.nn as nn
