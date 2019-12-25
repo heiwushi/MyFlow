@@ -31,7 +31,7 @@ class Optimizer(object):
         self.learn_rate = learn_rate
         self.apply_gradient = Optimizer.ApplyGradient(learn_rate)
 
-    def compute_gradient(self, loss: Tensor, var_list, name=None):
+    def compute_gradient(self, loss: Tensor, var_list=TRAIN_VARS_COLLECTIONS, name=None):
         '''
         给出因变量loss关于自变量var的梯度的计算图
         :param loss: 所求梯度的因变量

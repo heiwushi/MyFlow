@@ -11,7 +11,8 @@ class Session(object):
         else:
             inputs_vals = []
             for input_n in tensor.input_tensors:
-                inputs_vals.append(self.compute_tensor_val(input_n, feed_dict))
+                input_n_val = self.compute_tensor_val(input_n, feed_dict)
+                inputs_vals.append(input_n_val)
             return tensor.op.compute(tensor, inputs_vals)
 
     def run(self, eval_list, feed_dict=None):
