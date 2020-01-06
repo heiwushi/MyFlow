@@ -27,4 +27,15 @@ class TestOps(unittest.TestCase):
         c_val=TestOps.sess.run([c])[0]
         print(c_val)
 
+    def test_binomial_random(self):
+        c=mf.binomial_random(0.1, shape=[3,4])
+        c_val=TestOps.sess.run([c])[0]
+        print(c_val)
+
+    def test_dropout(self):
+        c=mf.dropout(TestOps.B, keep_prob=0.8)
+        c_val=TestOps.sess.run([c])[0]
+        print(c_val)
+
+
 
