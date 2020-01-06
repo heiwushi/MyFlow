@@ -1,8 +1,7 @@
 import numpy as np
 import abc
 from myflow.common import _GradientMode
-
-TRAIN_VARS_COLLECTIONS = []
+from myflow.graph import Graph
 
 
 class Tensor(object):
@@ -58,7 +57,7 @@ class Op(abc.ABC):
         return new_tensor
 
     @abc.abstractmethod
-    def compute(self, tensor: Tensor):
+    def compute(self, tensor: Tensor, input_vals):
         '''
         在Session.run()期间被调用，根据输入值, 计算tensor节点的前向输出值
         :return:
@@ -85,7 +84,7 @@ class Variable(Op):
         new_tensor = super().__call__(tensor_name)
         new_tensor.shape = list(init_value.shape)
         new_tensor.value = init_value
-        TRAIN_VARS_COLLECTIONS.append(new_tensor)
+        Graph.get_default_graph().TRAIN_VARS_COLLECTIONS.append(new_tensor)
         return new_tensor
 
     def compute(self, tensor: Tensor, input_vals):
@@ -103,6 +102,7 @@ class Constant(Op):
         new_tensor = super().__call__(tensor_name)
         new_tensor.shape = list(const_value.shape)
         new_tensor.value = const_value
+        Graph.get_default_graph().CONSTANTS_COLLECTIONS.append(new_tensor)
         return new_tensor
 
     def compute(self, tensor: Tensor, input_vals):
@@ -119,6 +119,7 @@ class PlaceHolder(Op):
     def __call__(self, shape, tensor_name=''):
         new_tensor = super().__call__(tensor_name)
         new_tensor.shape = list(shape)
+        Graph.get_default_graph().PLACEHOLDER_COLLECTIONS.append(new_tensor)
         return new_tensor
 
     def compute(self, tensor: Tensor, inputs_vals):
@@ -128,7 +129,28 @@ class PlaceHolder(Op):
         pass
 
 
-class Add(Op):
+class SingleInputOp(Op):
+    def __call__(self, input: Tensor, tensor_name=''):
+        new_tensor = super().__call__(tensor_name)
+        new_tensor.input_tensors = [input]
+        if not _GradientMode.is_gradient_mode():
+            input.out_tensors.append(new_tensor)
+        Graph.get_default_graph().OPERATION_TENSORS_COLLECTIONS.append(new_tensor)
+        return new_tensor
+
+
+class DoubleInputOp(Op):
+    def __call__(self, input1: Tensor, input2: Tensor, tensor_name=''):
+        new_tensor = super().__call__(tensor_name)
+        new_tensor.input_tensors = [input1, input2]
+        if not _GradientMode.is_gradient_mode():
+            input1.out_tensors.append(new_tensor)
+            input2.out_tensors.append(new_tensor)
+        Graph.get_default_graph().OPERATION_TENSORS_COLLECTIONS.append(new_tensor)
+        return new_tensor
+
+
+class Add(DoubleInputOp):
     '''
     矩阵逐元素相加
     '''
@@ -139,11 +161,7 @@ class Add(Op):
     def __call__(self, input1: Tensor, input2: Tensor, tensor_name=''):
         input1, input2 = convert_py_numeric(input1, input2)
         assert input1.shape == input2.shape
-        new_tensor = super().__call__(tensor_name)
-        new_tensor.input_tensors = [input1, input2]
-        if not _GradientMode.is_gradient_mode():
-            input1.out_tensors.append(new_tensor)
-            input2.out_tensors.append(new_tensor)
+        new_tensor = super().__call__(input1, input2, tensor_name)
         new_tensor.shape = list(input1.shape)
         return new_tensor
 
@@ -154,7 +172,7 @@ class Add(Op):
         return [output_grad, output_grad]
 
 
-class Mul(Op):
+class Mul(DoubleInputOp):
     '''
     矩阵逐元素相乘
     '''
@@ -165,11 +183,7 @@ class Mul(Op):
     def __call__(self, input1: Tensor, input2: Tensor, tensor_name=''):
         input1, input2 = convert_py_numeric(input1, input2)
         assert input1.shape == input2.shape
-        new_tensor = super().__call__(tensor_name)
-        new_tensor.input_tensors = [input1, input2]
-        if not _GradientMode.is_gradient_mode():
-            input1.out_tensors.append(new_tensor)
-            input2.out_tensors.append(new_tensor)
+        new_tensor = super().__call__(input1, input2, tensor_name)
         new_tensor.shape = input1.shape
         return new_tensor
 
@@ -180,18 +194,14 @@ class Mul(Op):
         return [output_grad * tensor.input_tensors[1], output_grad * tensor.input_tensors[0]]
 
 
-class MatMul(Op):
+class MatMul(DoubleInputOp):
 
     def __init__(self):
         self.op_name = "MatMul"
 
     def __call__(self, input1: Tensor, input2: Tensor, tensor_name=''):
         assert input1.shape[1] == input2.shape[0]
-        new_tensor = super().__call__(tensor_name)
-        new_tensor.input_tensors = [input1, input2]
-        if not _GradientMode.is_gradient_mode():
-            input1.out_tensors.append(new_tensor)
-            input2.out_tensors.append(new_tensor)
+        new_tensor = super().__call__(input1, input2, tensor_name)
         new_tensor.shape = [input1.shape[0], input2.shape[1]]
         return new_tensor
 
@@ -203,16 +213,32 @@ class MatMul(Op):
                 matmul(transpose(tensor.input_tensors[0]), output_grad)]
 
 
-class Transpose(Op):
+class Divide(DoubleInputOp):
+    def __init__(self):
+        self.op_name = "Divide"
+
+    def __call__(self, input1: Tensor, input2: Tensor, tensor_name=''):
+        input1, input2 = convert_py_numeric(input1, input2)
+        assert input1.shape == input2.shape
+        new_tensor = super().__call__(input1, input2, tensor_name)
+        new_tensor.shape = list(input1.shape)
+        return new_tensor
+
+    def compute(self, tensor: Tensor, input_vals):
+        return np.divide(input_vals[0], input_vals[1])
+
+    def gradient(self, tensor: Tensor, output_grad: Tensor):
+        return [output_grad / tensor.input_tensors[1],
+                -output_grad * tensor.input_tensors[0] / (tensor.input_tensors[1] * tensor.input_tensors[1])]
+
+
+class Transpose(SingleInputOp):
 
     def __init__(self):
         self.op_name = "Transpose"
 
     def __call__(self, input: Tensor, tensor_name=''):
-        new_tensor = super().__call__(tensor_name)
-        new_tensor.input_tensors = [input]
-        if not _GradientMode.is_gradient_mode():
-            input.out_tensors.append(new_tensor)
+        new_tensor = super().__call__(input, tensor_name)
         new_tensor.shape = [input.shape[1], input.shape[0]]
         return new_tensor
 
@@ -223,16 +249,13 @@ class Transpose(Op):
         return [transpose(output_grad)]
 
 
-class OnesLike(Op):
+class OnesLike(SingleInputOp):
 
     def __init__(self):
         self.op_name = "OnesLike"
 
     def __call__(self, input: Tensor, tensor_name=''):
-        new_tensor = super().__call__(tensor_name)
-        new_tensor.input_tensors = [input]
-        if not _GradientMode.is_gradient_mode():
-            input.out_tensors.append(new_tensor)
+        new_tensor = super().__call__(input, tensor_name)
         new_tensor.shape = list(input.shape)
         return new_tensor
 
@@ -243,16 +266,13 @@ class OnesLike(Op):
         return [zeroslike(tensor.input_tensors[0])]
 
 
-class ZerosLike(Op):
+class ZerosLike(SingleInputOp):
 
     def __init__(self):
         self.op_name = "ZerosLike"
 
     def __call__(self, input: Tensor, tensor_name=''):
-        new_tensor = super().__call__(tensor_name)
-        new_tensor.input_tensors = [input]
-        if not _GradientMode.is_gradient_mode():
-            input.out_tensors.append(new_tensor)
+        new_tensor = super().__call__(input, tensor_name)
         new_tensor.shape = list(input.shape)
         return new_tensor
 
@@ -263,16 +283,13 @@ class ZerosLike(Op):
         return [zeroslike(tensor.input_tensors[0])]
 
 
-class ReduceSum(Op):
+class ReduceSum(SingleInputOp):
 
     def __init__(self):
         self.op_name = "ReduceSum"
 
     def __call__(self, input: Tensor, axis, tensor_name=''):
-        new_tensor = super().__call__(tensor_name)
-        new_tensor.input_tensors = [input]
-        if not _GradientMode.is_gradient_mode():
-            input.out_tensors.append(new_tensor)
+        new_tensor = super().__call__(input, tensor_name)
         new_tensor.params["axis"] = axis
         new_shape = list(input.shape)
         new_shape.pop(axis)
@@ -291,16 +308,13 @@ class ReduceSum(Op):
         return [broadcast(new_output_grad, shape=tensor.input_tensors[0].shape, axis=tensor.params["axis"])]
 
 
-class Broadcast(Op):
+class Broadcast(SingleInputOp):
     def __init__(self):
         self.op_name = "Broadcast"
 
     def __call__(self, input: Tensor, shape, axis, tensor_name=''):
         assert input.shape[axis] == 1
-        new_tensor = super().__call__(tensor_name)
-        new_tensor.input_tensors = [input]
-        if not _GradientMode.is_gradient_mode():
-            input.out_tensors.append(new_tensor)
+        new_tensor = super().__call__(input, tensor_name)
         new_shape = list(input.shape)
         new_shape[axis] = shape[axis]
         new_tensor.shape = new_shape
@@ -311,20 +325,18 @@ class Broadcast(Op):
         return np.broadcast_to(input_vals[0], tensor.shape)
 
     def gradient(self, tensor: Tensor, output_grad: Tensor):
-        #因为reduce_sum操作会消减掉axis维度，而broadcast操作的输入在axis上维度应该为1，所以还需要reshape一下
+        # 因为reduce_sum操作会消减掉axis维度，而broadcast操作的输入在axis上维度应该为1，所以还需要reshape一下
         return [reshape(reduce_sum(output_grad, axis=tensor.params["axis"]), tensor.input_tensors[0].shape)]
 
 
-class Sigmoid(Op):
+class Sigmoid(SingleInputOp):
     def __init__(self):
         self.op_name = "Sigmoid"
 
     def __call__(self, input: Tensor, tensor_name=''):
-        new_tensor = super().__call__(tensor_name)
-        new_tensor.input_tensors = [input]
-        if not _GradientMode.is_gradient_mode():
-            input.out_tensors.append(new_tensor)
+        new_tensor = super().__call__(input, tensor_name)
         new_tensor.shape = list(input.shape)
+        Graph.get_default_graph().OPERATION_TENSORS_COLLECTIONS.append(new_tensor)
         return new_tensor
 
     def compute(self, tensor: Tensor, input_vals):
@@ -335,15 +347,12 @@ class Sigmoid(Op):
         return [sigmoid(x) * (1 - sigmoid(x)) * output_grad]
 
 
-class Relu(Op):
+class Relu(SingleInputOp):
     def __init__(self):
         self.op_name = "Relu"
 
     def __call__(self, input: Tensor, tensor_name=''):
-        new_tensor = super().__call__(tensor_name)
-        new_tensor.input_tensors = [input]
-        if not _GradientMode.is_gradient_mode():
-            input.out_tensors.append(new_tensor)
+        new_tensor = super().__call__(input, tensor_name)
         new_tensor.shape = list(input.shape)
         return new_tensor
 
@@ -354,16 +363,13 @@ class Relu(Op):
         return [stepfunc(tensor.input_tensors[0]) * output_grad]
 
 
-class StepFunc(Op):
+class StepFunc(SingleInputOp):
 
     def __init__(self):
         self.op_name = "Relu"
 
     def __call__(self, input: Tensor, tensor_name=''):
-        new_tensor = super().__call__(tensor_name)
-        new_tensor.input_tensors = [input]
-        if not _GradientMode.is_gradient_mode():
-            input.out_tensors.append(new_tensor)
+        new_tensor = super().__call__(input, tensor_name)
         new_tensor.shape = list(input.shape)
         return new_tensor
 
@@ -374,15 +380,12 @@ class StepFunc(Op):
         pass
 
 
-class Minus(Op):
+class Minus(SingleInputOp):
     def __init__(self):
         self.op_name = "Minus"
 
     def __call__(self, input: Tensor, tensor_name=''):
-        new_tensor = super().__call__(tensor_name)
-        new_tensor.input_tensors = [input]
-        if not _GradientMode.is_gradient_mode():
-            input.out_tensors.append(new_tensor)
+        new_tensor = super().__call__(input, tensor_name)
         new_tensor.shape = list(input.shape)
         return new_tensor
 
@@ -393,15 +396,12 @@ class Minus(Op):
         return [-output_grad]
 
 
-class Exp(Op):
+class Exp(SingleInputOp):
     def __init__(self):
         self.op_name = "Exp"
 
     def __call__(self, input: Tensor, tensor_name=''):
-        new_tensor = super().__call__(tensor_name)
-        new_tensor.input_tensors = [input]
-        if not _GradientMode.is_gradient_mode():
-            input.out_tensors.append(new_tensor)
+        new_tensor = super().__call__(input, tensor_name)
         new_tensor.shape = list(input.shape)
         return new_tensor
 
@@ -412,15 +412,12 @@ class Exp(Op):
         return [exp(tensor.input_tensors[0]) * output_grad]
 
 
-class Log(Op):
+class Log(SingleInputOp):
     def __init__(self):
         self.op_name = "Log"
 
     def __call__(self, input: Tensor, tensor_name=''):
-        new_tensor = super().__call__(tensor_name)
-        new_tensor.input_tensors = [input]
-        if not _GradientMode.is_gradient_mode():
-            input.out_tensors.append(new_tensor)
+        new_tensor = super().__call__(input, tensor_name)
         new_tensor.shape = list(input.shape)
         return new_tensor
 
@@ -431,15 +428,12 @@ class Log(Op):
         return [output_grad / tensor.input_tensors[0]]
 
 
-class Reshape(Op):
+class Reshape(SingleInputOp):
     def __init__(self):
         self.op_name = "Reshape"
 
     def __call__(self, input: Tensor, shape, tensor_name=''):
-        new_tensor = super().__call__(tensor_name)
-        new_tensor.input_tensors = [input]
-        if not _GradientMode.is_gradient_mode():
-            input.out_tensors.append(new_tensor)
+        new_tensor = super().__call__(input, tensor_name)
         new_tensor.shape = list(shape)
         return new_tensor
 
@@ -450,28 +444,21 @@ class Reshape(Op):
         return [reshape(output_grad, tensor.input_tensors[0].shape)]
 
 
-
-class Divide(Op):
+class Dropout(SingleInputOp):
     def __init__(self):
-        self.op_name = "Divide"
+        self.op_name = "Dropout"
 
-    def __call__(self, input1: Tensor, input2: Tensor, tensor_name=''):
-        input1, input2 = convert_py_numeric(input1, input2)
-        assert input1.shape == input2.shape
-        new_tensor = super().__call__(tensor_name)
-        new_tensor.input_tensors = [input1, input2]
-        if not _GradientMode.is_gradient_mode():
-            input1.out_tensors.append(new_tensor)
-            input2.out_tensors.append(new_tensor)
-        new_tensor.shape = list(input1.shape)
+    def __call__(self, input: Tensor, keep_prob, tensor_name=''):
+        new_tensor = super().__call__(input, tensor_name)
+        new_tensor.shape = list(input.shape)
+        new_tensor.params["keep_prob"] = keep_prob
         return new_tensor
 
     def compute(self, tensor: Tensor, input_vals):
-        return np.divide(input_vals[0], input_vals[1])
+        return input_vals[0] * np.random.binomial(1, tensor.params["keep_prob"], size=tensor.shape)
 
     def gradient(self, tensor: Tensor, output_grad: Tensor):
-        return [output_grad / tensor.input_tensors[1],
-                -output_grad * tensor.input_tensors[0] / (tensor.input_tensors[1] * tensor.input_tensors[1])]
+        return [dropout(output_grad, tensor.params["keep_prob"])]
 
 
 def convert_py_numeric(x, y):
@@ -488,16 +475,17 @@ add = Add()
 minus = Minus()
 mul = Mul()
 matmul = MatMul()
+divide = Divide()
 transpose = Transpose()
 reduce_sum = ReduceSum()
 broadcast = Broadcast()
 exp = Exp()
 log = Log()
-divide = Divide()
 sigmoid = Sigmoid()
 relu = Relu()
 stepfunc = StepFunc()
 reshape = Reshape()
+dropout = Dropout()
 
 placeholder = PlaceHolder()
 variable = Variable()
