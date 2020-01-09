@@ -36,10 +36,12 @@ with mf.Session() as sess:
 
 数据集下载地址：<https://download.microsoft.com/download/3/E/1/3E1C3F21-ECDB-4869-8368-6DEBA77B919F/kagglecatsanddogs_3367a.zip>
 
-1.下载数据集并解压到Myflow项目的根目录下，将数据集文件夹重命名为kagglecatsanddogs，如下图:
+1. 下载数据集并解压到Myflow项目的根目录下，将数据集文件夹重命名为kagglecatsanddogs，如下图:
 ![mulu.png](https://github.com/heiwushi/MyFlow/blob/master/docimgs/mulu.png)
-2.进入Myflow根目录，安装需要的python 依赖： pip install -r requirements.txt
-3.运行python cats_and_dogs.py
 
-当训练进行10000次迭代时，验证集的准确率达到，训练过程中准确率变化的曲线如下图:
+2. 进入Myflow根目录，安装需要的python 依赖： pip install -r requirements.txt
+
+3. 运行python cats_and_dogs.py
+
+当训练进行10000次迭代时，验证集的准确率达到97%，训练过程中准确率变化的曲线如下图:
 ![train.png](https://github.com/heiwushi/MyFlow/blob/master/docimgs/train.png)
