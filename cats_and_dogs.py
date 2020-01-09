@@ -28,10 +28,9 @@ class FCModel(object):
         self.b2 = mf.variable(init_value=np.zeros([hidden_size2]), tensor_name="b2")
         self.l2 = mf.nn.add_bias(mf.matmul(self.h1, self.v2), self.b2, tensor_name="logits2")
         self.h2 = mf.relu(self.l2)
-        self.d2 = mf.dropout(self.h2, 0.8)
         self.v3 = mf.variable(init_value=1 - 2 * np.random.random([hidden_size2, class_num]), tensor_name="v3")
         self.b3 = mf.variable(init_value=np.zeros([class_num]), tensor_name="b3")
-        self.logits = mf.nn.add_bias(mf.matmul(self.d2, self.v3), self.b3, tensor_name="logits3")
+        self.logits = mf.nn.add_bias(mf.matmul(self.h2, self.v3), self.b3, tensor_name="logits3")
         self.y_pred = mf.sigmoid(self.logits)
 
 
@@ -57,7 +56,6 @@ def read_pics_dataset():
                     train_label_dataset.append([i])
                 if count % 1000 == 0:
                     print("read dataset:", round(float(count) / total_num * 100.0), "%")
-                    break
 
     print("read dataset: 100 %")
     train_input_dataset = np.asarray(train_input_dataset)
@@ -90,9 +88,9 @@ def main():
         vars_gradients = optimizer.compute_gradient(loss)
         train_step = optimizer.apply_gradient(vars_gradients)
         with mf.Session() as sess:
-            for i in range(10000):
+            for i in range(1, 10001):
                 train_input_batch, train_label_batch = get_batch(train_input_dataset, train_label_dataset, BATCH_SIZE)
-                _= sess.run([train_step], feed_dict={x: train_input_batch, y: train_label_batch})
+                _, loss_val, y_pred_val= sess.run([train_step, loss, y_pred], feed_dict={x: train_input_batch, y: train_label_batch})
                 y_pred_val = np.asarray(list(map(lambda item:1 if item[0]>0.5 else 0, y_pred_val)), np.int8)
                 train_accuracy = metrics.accuracy_score(train_label_batch, y_pred_val)
                 print("train:", i, loss_val, train_accuracy)
@@ -104,6 +102,7 @@ def main():
                     test_accuracy = metrics.accuracy_score(test_label_batch, test_y_pred_val)
                     print("validate:", i, test_loss_val, test_accuracy)
                     plotter.plot(i, train_accuracy, i, test_accuracy)
+    plotter.show()
 
 
 class Plotter(object):
@@ -131,6 +130,10 @@ class Plotter(object):
         plt.plot(self.test_xs, self.test_ys, label="validate")
         plt.legend(loc="upper left", shadow=True)
         plt.pause(0.001)
+
+    def show(self):
+        plt.ioff()
+        plt.show()
 
 
 if __name__ == '__main__':
