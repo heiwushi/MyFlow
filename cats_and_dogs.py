@@ -56,6 +56,7 @@ def read_pics_dataset():
                     train_label_dataset.append([i])
                 if count % 1000 == 0:
                     print("read dataset:", round(float(count) / total_num * 100.0), "%")
+
     print("read dataset: 100 %")
     train_input_dataset = np.asarray(train_input_dataset)
     train_label_dataset = np.asarray(train_label_dataset)
@@ -87,7 +88,7 @@ def main():
         vars_gradients = optimizer.compute_gradient(loss)
         train_step = optimizer.apply_gradient(vars_gradients)
         with mf.Session() as sess:
-            for i in range(10000):
+            for i in range(1, 10001):
                 train_input_batch, train_label_batch = get_batch(train_input_dataset, train_label_dataset, BATCH_SIZE)
                 _, loss_val, y_pred_val= sess.run([train_step, loss, y_pred], feed_dict={x: train_input_batch, y: train_label_batch})
                 y_pred_val = np.asarray(list(map(lambda item:1 if item[0]>0.5 else 0, y_pred_val)), np.int8)
@@ -101,6 +102,7 @@ def main():
                     test_accuracy = metrics.accuracy_score(test_label_batch, test_y_pred_val)
                     print("validate:", i, test_loss_val, test_accuracy)
                     plotter.plot(i, train_accuracy, i, test_accuracy)
+    plotter.show()
 
 
 class Plotter(object):
@@ -125,9 +127,13 @@ class Plotter(object):
         self.test_xs.append(test_x)
         self.test_ys.append(test_y)
         plt.plot(self.xs, self.ys, label="train")
-        plt.plot(self.test_xs, self.test_ys, label="test")
+        plt.plot(self.test_xs, self.test_ys, label="validate")
         plt.legend(loc="upper left", shadow=True)
         plt.pause(0.001)
+
+    def show(self):
+        plt.ioff()
+        plt.show()
 
 
 if __name__ == '__main__':

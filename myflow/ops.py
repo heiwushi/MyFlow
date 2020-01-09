@@ -249,38 +249,38 @@ class Transpose(SingleInputOp):
         return [transpose(output_grad)]
 
 
-class OnesLike(SingleInputOp):
+class Ones(Op):
 
     def __init__(self):
-        self.op_name = "OnesLike"
+        self.op_name = "Ones"
 
-    def __call__(self, input: Tensor, tensor_name=''):
-        new_tensor = super().__call__(input, tensor_name)
-        new_tensor.shape = list(input.shape)
+    def __call__(self, shape, tensor_name=''):
+        new_tensor = super().__call__(tensor_name)
+        new_tensor.shape = list(shape)
         return new_tensor
 
     def compute(self, tensor: Tensor, input_vals):
-        return np.ones(input_vals[0].shape)
+        return np.ones(tensor.shape)
 
     def gradient(self, tensor: Tensor, output_grad: Tensor):
-        return [zeroslike(tensor.input_tensors[0])]
+        return [zeros(tensor.shape)]
 
 
-class ZerosLike(SingleInputOp):
+class Zeros(Op):
 
     def __init__(self):
-        self.op_name = "ZerosLike"
+        self.op_name = "Zeros"
 
-    def __call__(self, input: Tensor, tensor_name=''):
-        new_tensor = super().__call__(input, tensor_name)
-        new_tensor.shape = list(input.shape)
+    def __call__(self, shape, tensor_name=''):
+        new_tensor = super().__call__(tensor_name)
+        new_tensor.shape = list(shape)
         return new_tensor
 
     def compute(self, tensor: Tensor, input_vals):
-        return np.zeros(input_vals[0].shape)
+        return np.zeros(tensor.shape)
 
     def gradient(self, tensor: Tensor, output_grad: Tensor):
-        return [zeroslike(tensor.input_tensors[0])]
+        return [zeros(tensor.shape)]
 
 
 class ReduceSum(SingleInputOp):
@@ -455,6 +455,7 @@ class Dropout(SingleInputOp):
         return new_tensor
 
     def compute(self, tensor: Tensor, input_vals):
+        print("dropout:", tensor)
         return input_vals[0] * np.random.binomial(1, tensor.params["keep_prob"], size=tensor.shape)
 
     def gradient(self, tensor: Tensor, output_grad: Tensor):
@@ -462,6 +463,12 @@ class Dropout(SingleInputOp):
 
 
 def convert_py_numeric(x, y):
+    '''
+    将python中的字面常量数值转化为constant的tensor节点
+    :param x:
+    :param y:
+    :return:
+    '''
     assert type(x) in [int, float, Tensor]
     assert type(y) in [int, float, Tensor]
     if isinstance(x, int) or isinstance(x, float):
@@ -486,9 +493,10 @@ relu = Relu()
 stepfunc = StepFunc()
 reshape = Reshape()
 dropout = Dropout()
+ones = Ones()
+zeros = Zeros()
 
 placeholder = PlaceHolder()
 variable = Variable()
 constant = Constant()
-oneslike = OnesLike()
-zeroslike = ZerosLike()
+
