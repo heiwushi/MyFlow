@@ -43,5 +43,5 @@ with mf.Session() as sess:
 
 3. 运行python cats_and_dogs.py
 
-对于Cats and Dogs数据集，这里使用Myflow搭建里了一个简单的多层全连接二分类网络。当训练进行10000次迭代时，验证集的准确率达到了96%。训练过程中准确率变化的曲线如下图:
+对于Cats and Dogs数据集，这里使用Myflow搭建了一个简单的多层全连接二分类网络。当训练进行10000次迭代时，验证集的准确率达到了96%。训练过程中准确率变化的曲线如下图:
 ![train.png](https://github.com/heiwushi/MyFlow/blob/master/docimgs/train.png)
