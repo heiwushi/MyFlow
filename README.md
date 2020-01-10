@@ -31,7 +31,7 @@ with mf.Session() as sess:
     print("z_val:", z_val)
 ```
 ---
-## 搭建模型训练Kaggle Cats and Dogs数据集
+## 搭建模型训练Kaggle Cats and Dogs数据集：
 搭建了一个二分类的多层全连接网络，分类数据集中的猫和狗的图片。代码见cats_and_dogs.py。
 
 数据集下载地址：<https://download.microsoft.com/download/3/E/1/3E1C3F21-ECDB-4869-8368-6DEBA77B919F/kagglecatsanddogs_3367a.zip>
