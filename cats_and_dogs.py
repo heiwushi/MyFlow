@@ -117,9 +117,9 @@ class Plotter(object):
 
     def plot(self, x, y, test_x, test_y):
         plt.cla()
-        plt.title("curve")
+        plt.title("cats and dogs")
         plt.xlabel("step")
-        plt.ylabel("loss")
+        plt.ylabel("accuracy")
 
         plt.grid(True)
         self.xs.append(x)
